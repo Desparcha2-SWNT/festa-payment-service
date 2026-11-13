@@ -1,0 +1,73 @@
+# CI de festa-payment-service (RF11).
+# 1) Escaneo de secretos y vulnerabilidades, y CodeQL (JavaScript): workflow reutilizable de la organización.
+# 2) Linter (ESLint) y pruebas (Vitest, incluida la de contrato) con Node.
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  seguridad:
+    uses: Desparcha2-SWNT/.github/.github/workflows/ci-reusable.yml@main
+    # El workflow llamado no puede pedir más permisos que este job. Su job de CodeQL declara
+    # security-events: write y GitHub lo valida al arrancar aunque CodeQL esté desactivado.
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      # Este repo compila y prueba en su propio job; el build del CI reutilizable se omite (no queda en verde, queda "skipped").
+      stack: none
+      enable-codeql: true
+      codeql-language: javascript-typescript
+
+  node:
+    name: Linter y pruebas (Node 20)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Contratos de mensajería (festa-infra es público, no hace falta token) para la prueba de contrato.
+      - name: Descargar contratos de festa-infra
+        uses: actions/checkout@v4
+        with:
+          repository: Desparcha2-SWNT/festa-infra
+          ref: develop
+          path: .festa-infra
+          sparse-checkout: contracts
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Linter (ESLint)
+        run: npm run lint
+
+      - name: Pruebas
+        run: npm run test:ci
+        env:
+          FESTA_CONTRACTS_DIR: ${{ github.workspace }}/.festa-infra/contracts
+
+      - name: Publicar resultados de pruebas en el PR
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: test-results/junit.xml
+          check_name: Pruebas Vitest
+          detailed_summary: true
+          include_passed: true
