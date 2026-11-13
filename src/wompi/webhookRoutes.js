@@ -1,10 +1,15 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool.js';
 import { logger } from '../logger.js';
 import { applyTransaction } from '../orders/repository.js';
 import { verifyEventSignature } from './wompi.js';
 
 export const webhookRouter = Router();
+
+// La ruta es pública y verificar la firma cuesta CPU: se limita por IP. El tope es holgado porque
+// Wompi reintenta y agrupa notificaciones; un exceso responde 429 y Wompi vuelve a intentar.
+webhookRouter.use(rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: true, legacyHeaders: false }));
 
 /**
  * Webhook de Wompi (público en Kong, sin JWT): la autenticidad la da la firma del evento.

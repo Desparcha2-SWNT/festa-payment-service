@@ -137,6 +137,11 @@ describe('POST /webhooks/wompi', () => {
     expect(res.body.duplicate).toBe(true);
     expect(repo.applyTransaction).not.toHaveBeenCalled();
   });
+
+  it('tiene límite de peticiones por IP aunque sea pública', async () => {
+    const res = await request(createApp()).post('/webhooks/wompi').send(body());
+    expect(res.headers['ratelimit-limit']).toBe('300');
+  });
 });
 
 describe('sistema', () => {
