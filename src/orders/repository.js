@@ -9,6 +9,9 @@ export const EXCHANGE = 'festa.payment';
 // Comprador anonimizado (Ley 1581): las órdenes se conservan por contabilidad sin dato personal.
 export const ANONYMOUS_BUYER = '00000000-0000-0000-0000-000000000000';
 
+// Moneda de todas las órdenes; una transacción de Wompi en otra moneda no puede aprobarlas.
+const ORDER_CURRENCY = 'COP';
+
 const iso = (d) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
 
 export function toApi(row) {
@@ -165,12 +168,16 @@ function failedPayload(order, status, reason, transactionId) {
  * (y la simulación local). Idempotente: una orden que ya no está PENDING no cambia, salvo un
  * APPROVED tardío sobre una orden vencida, que se vende si aún hay cupo o pasa a reembolso.
  */
-export async function applyTransaction({ reference, status, amountInCents, transactionId, paymentMethodType, statusMessage }, correlationId = null) {
+export async function applyTransaction({ reference, status, amountInCents, currency, transactionId, paymentMethodType, statusMessage }, correlationId = null) {
   return withTransaction(async (client) => {
     const order = await lockOrder(client, 'reference', reference);
     if (!order) return { outcome: 'unknown_reference' };
     if (amountInCents != null && Number(amountInCents) !== order.total_cents) {
       return { outcome: 'amount_mismatch', order };
+    }
+    // Las órdenes se crean siempre en COP; una transacción en otra moneda nunca aprueba la orden.
+    if (String(currency ?? '').toUpperCase() !== ORDER_CURRENCY) {
+      return { outcome: 'currency_mismatch', order };
     }
 
     const event = await lockEvent(client, order.event_id);
