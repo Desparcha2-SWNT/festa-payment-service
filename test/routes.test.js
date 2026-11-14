@@ -131,11 +131,47 @@ describe('POST /webhooks/wompi', () => {
     );
   });
 
-  it('ignora un webhook repetido', async () => {
-    db.query.mockResolvedValue({ rowCount: 0 });
+  it('responde 200 a un webhook repetido ya aplicado', async () => {
+    db.query.mockReset();
+    db.query.mockResolvedValueOnce({ rowCount: 0 }).mockResolvedValueOnce({ rows: [{ processed_at: new Date() }] });
     const res = await request(createApp()).post('/webhooks/wompi').send(body());
+    expect(res.status).toBe(200);
     expect(res.body.duplicate).toBe(true);
     expect(repo.applyTransaction).not.toHaveBeenCalled();
+  });
+
+  it('responde 503 a un repetido que sigue en proceso, para que Wompi reintente', async () => {
+    db.query.mockReset();
+    db.query
+      .mockResolvedValueOnce({ rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [{ processed_at: null }] })
+      .mockResolvedValueOnce({ rowCount: 0 });
+    const res = await request(createApp()).post('/webhooks/wompi').send(body());
+    expect(res.status).toBe(503);
+    expect(repo.applyTransaction).not.toHaveBeenCalled();
+  });
+
+  it('retoma un webhook cuya marca venció (el primer intento murió) y lo aplica', async () => {
+    db.query.mockReset();
+    db.query
+      .mockResolvedValueOnce({ rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [{ processed_at: null }] })
+      .mockResolvedValueOnce({ rowCount: 1 })
+      .mockResolvedValue({ rowCount: 1 });
+    repo.applyTransaction.mockResolvedValue({ outcome: 'approved' });
+    const res = await request(createApp()).post('/webhooks/wompi').send(body());
+    expect(res.status).toBe(200);
+    expect(repo.applyTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('pasa la moneda de la transacción a applyTransaction', async () => {
+    db.query.mockReset();
+    db.query.mockResolvedValue({ rowCount: 1 });
+    repo.applyTransaction.mockResolvedValue({ outcome: 'currency_mismatch' });
+    const b = body();
+    b.data.transaction.currency = 'USD';
+    await request(createApp()).post('/webhooks/wompi').send(b);
+    expect(repo.applyTransaction).toHaveBeenCalledWith(expect.objectContaining({ currency: 'USD' }), null);
   });
 
   it('tiene límite de peticiones por IP aunque sea pública', async () => {

@@ -25,18 +25,33 @@ webhookRouter.post('/wompi', async (req, res, next) => {
   if (body.event !== 'transaction.updated') return res.json({ ignored: body.event });
 
   const tx = body.data?.transaction ?? {};
+  const checksum = body.signature.checksum;
   try {
-    const seen = await pool.query(
+    // Marca de la entrega: sin processed_at aún se está procesando (o falló y se va a reintentar).
+    const claim = await pool.query(
       'INSERT INTO wompi_webhooks (checksum, reference, status) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-      [body.signature.checksum, String(tx.reference ?? ''), String(tx.status ?? '')],
+      [checksum, String(tx.reference ?? ''), String(tx.status ?? '')],
     );
-    if (seen.rowCount === 0) return res.json({ duplicate: true });
+    if (claim.rowCount === 0) {
+      const { rows } = await pool.query('SELECT processed_at FROM wompi_webhooks WHERE checksum = $1', [checksum]);
+      // Solo un webhook ya aplicado responde 200: Wompi deja de reintentar al recibirlo.
+      if (rows[0]?.processed_at) return res.json({ duplicate: true });
+      // Otra entrega lo está procesando, o un intento anterior murió sin terminar: se toma solo si
+      // la marca está vencida (5 min). Si no, 503 para que Wompi lo reintente más tarde.
+      const retake = await pool.query(
+        `UPDATE wompi_webhooks SET received_at = now()
+          WHERE checksum = $1 AND processed_at IS NULL AND received_at < now() - interval '5 minutes'`,
+        [checksum],
+      );
+      if (retake.rowCount === 0) return res.status(503).json({ error: 'webhook en proceso, reintentar' });
+    }
 
     const result = await applyTransaction(
       {
         reference: tx.reference,
         status: tx.status,
         amountInCents: tx.amount_in_cents,
+        currency: tx.currency,
         transactionId: tx.id,
         paymentMethodType: tx.payment_method_type,
         statusMessage: tx.status_message,
@@ -46,10 +61,14 @@ webhookRouter.post('/wompi', async (req, res, next) => {
     if (result.outcome === 'amount_mismatch') {
       logger.error({ reference: tx.reference, amount: tx.amount_in_cents }, 'el monto de Wompi no coincide con la orden');
     }
+    if (result.outcome === 'currency_mismatch') {
+      logger.error({ reference: tx.reference, currency: tx.currency }, 'la moneda de Wompi no coincide con la orden');
+    }
+    await pool.query('UPDATE wompi_webhooks SET processed_at = now() WHERE checksum = $1', [checksum]);
     res.json({ outcome: result.outcome });
   } catch (err) {
-    // Se borra la marca para que el reintento de Wompi sí se procese.
-    await pool.query('DELETE FROM wompi_webhooks WHERE checksum = $1', [body.signature.checksum]).catch(() => {});
+    // Se borra la marca para que el reintento de Wompi sí se procese (y el error le hace reintentar).
+    await pool.query('DELETE FROM wompi_webhooks WHERE checksum = $1 AND processed_at IS NULL', [checksum]).catch(() => {});
     next(err);
   }
 });
