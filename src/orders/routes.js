@@ -134,6 +134,7 @@ paymentsRouter.post('/orders/:id/simulate', validId, async (req, res, next) => {
         reference: order.reference,
         status: parsed.data.status,
         amountInCents: order.total_cents,
+        currency: 'COP', // las órdenes son siempre en COP; el simulador lo declara como lo haría Wompi
         transactionId: `sim-${Date.now()}`,
         paymentMethodType: 'CARD',
         statusMessage: parsed.data.status === 'APPROVED' ? null : 'simulado',

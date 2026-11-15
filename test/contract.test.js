@@ -88,19 +88,19 @@ describe.skipIf(!fs.existsSync(schemaFile('order.created')))('contratos de payme
   });
 
   it('order.approved', async () => {
-    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'APPROVED', amountInCents: 5_400_000, transactionId: 'tx-1', paymentMethodType: 'NEQUI' });
+    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'APPROVED', amountInCents: 5_400_000, currency: 'COP', transactionId: 'tx-1', paymentMethodType: 'NEQUI' });
     expect(result.outcome).toBe('approved');
     expectValid('order.approved', lastPayload('order.approved'));
   });
 
   it('rechaza un monto distinto al de la orden', async () => {
-    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'APPROVED', amountInCents: 1 });
+    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'APPROVED', amountInCents: 1, currency: 'COP' });
     expect(result.outcome).toBe('amount_mismatch');
     expect(h.enqueue).not.toHaveBeenCalled();
   });
 
   it('order.failed', async () => {
-    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'DECLINED', amountInCents: 5_400_000, transactionId: 'tx-2', statusMessage: 'Fondos insuficientes' });
+    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'DECLINED', amountInCents: 5_400_000, currency: 'COP', transactionId: 'tx-2', statusMessage: 'Fondos insuficientes' });
     expect(result.outcome).toBe('failed');
     expectValid('order.failed', lastPayload('order.failed'));
   });
