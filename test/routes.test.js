@@ -174,6 +174,17 @@ describe('POST /webhooks/wompi', () => {
     expect(repo.applyTransaction).toHaveBeenCalledWith(expect.objectContaining({ currency: 'USD' }), null);
   });
 
+  it('si falla, borra la marca solo con el claim_id de este intento', async () => {
+    db.query.mockReset();
+    db.query.mockResolvedValue({ rowCount: 1 });
+    repo.applyTransaction.mockRejectedValue(new Error('pg caído'));
+    await request(createApp()).post('/webhooks/wompi').send(body());
+    const del = db.query.mock.calls.find(([sql]) => /DELETE FROM wompi_webhooks/.test(sql));
+    expect(del).toBeDefined();
+    expect(del[0]).toMatch(/claim_id = \$2/);
+    expect(del[1][1]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
   it('tiene límite de peticiones por IP aunque sea pública', async () => {
     const res = await request(createApp()).post('/webhooks/wompi').send(body());
     expect(res.headers['ratelimit-limit']).toBe('300');

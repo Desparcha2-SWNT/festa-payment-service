@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../db/pool.js';
@@ -26,11 +27,13 @@ webhookRouter.post('/wompi', async (req, res, next) => {
 
   const tx = body.data?.transaction ?? {};
   const checksum = body.signature.checksum;
+  // Identidad de este intento: solo quien tiene este claim_id puede finalizar o borrar la marca.
+  const claimId = randomUUID();
   try {
     // Marca de la entrega: sin processed_at aún se está procesando (o falló y se va a reintentar).
     const claim = await pool.query(
-      'INSERT INTO wompi_webhooks (checksum, reference, status) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-      [checksum, String(tx.reference ?? ''), String(tx.status ?? '')],
+      'INSERT INTO wompi_webhooks (checksum, reference, status, claim_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+      [checksum, String(tx.reference ?? ''), String(tx.status ?? ''), claimId],
     );
     if (claim.rowCount === 0) {
       const { rows } = await pool.query('SELECT processed_at FROM wompi_webhooks WHERE checksum = $1', [checksum]);
@@ -39,9 +42,9 @@ webhookRouter.post('/wompi', async (req, res, next) => {
       // Otra entrega lo está procesando, o un intento anterior murió sin terminar: se toma solo si
       // la marca está vencida (5 min). Si no, 503 para que Wompi lo reintente más tarde.
       const retake = await pool.query(
-        `UPDATE wompi_webhooks SET received_at = now()
+        `UPDATE wompi_webhooks SET received_at = now(), claim_id = $2
           WHERE checksum = $1 AND processed_at IS NULL AND received_at < now() - interval '5 minutes'`,
-        [checksum],
+        [checksum, claimId],
       );
       if (retake.rowCount === 0) return res.status(503).json({ error: 'webhook en proceso, reintentar' });
     }
@@ -64,11 +67,18 @@ webhookRouter.post('/wompi', async (req, res, next) => {
     if (result.outcome === 'currency_mismatch') {
       logger.error({ reference: tx.reference, currency: tx.currency }, 'la moneda de Wompi no coincide con la orden');
     }
-    await pool.query('UPDATE wompi_webhooks SET processed_at = now() WHERE checksum = $1', [checksum]);
+    const finished = await pool.query(
+      'UPDATE wompi_webhooks SET processed_at = now() WHERE checksum = $1 AND claim_id = $2',
+      [checksum, claimId],
+    );
+    if (finished.rowCount === 0) {
+      // Nuestra marca venció y otra entrega la retomó: el efecto ya se aplicó (la orden no cambia dos veces).
+      logger.warn({ checksum }, 'la marca del webhook venció durante el procesamiento; otra entrega la retomó');
+    }
     res.json({ outcome: result.outcome });
   } catch (err) {
-    // Se borra la marca para que el reintento de Wompi sí se procese (y el error le hace reintentar).
-    await pool.query('DELETE FROM wompi_webhooks WHERE checksum = $1 AND processed_at IS NULL', [checksum]).catch(() => {});
+    // Se borra SOLO nuestra marca (si otra entrega la retomó, no se toca) para que el reintento sí se procese.
+    await pool.query('DELETE FROM wompi_webhooks WHERE checksum = $1 AND claim_id = $2 AND processed_at IS NULL', [checksum, claimId]).catch(() => {});
     next(err);
   }
 });
