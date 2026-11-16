@@ -47,7 +47,6 @@ CREATE TABLE orders (
   quantity                 integer NOT NULL CHECK (quantity BETWEEN 1 AND 10),
   unit_price_cents         integer NOT NULL CHECK (unit_price_cents > 0),
   subtotal_cents           integer NOT NULL,
-  commission_cents         integer NOT NULL,
   total_cents              integer NOT NULL,
   currency                 text NOT NULL DEFAULT 'COP',
   status                   text NOT NULL DEFAULT 'PENDING'
@@ -65,7 +64,7 @@ CREATE TABLE orders (
   created_at               timestamptz NOT NULL DEFAULT now(),
   updated_at               timestamptz NOT NULL DEFAULT now(),
   CHECK (subtotal_cents = unit_price_cents * quantity),
-  CHECK (total_cents = subtotal_cents + commission_cents)
+  CHECK (total_cents = subtotal_cents)
 );
 CREATE UNIQUE INDEX orders_idempotency_idx ON orders (buyer_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX orders_buyer_idx ON orders (buyer_id, created_at DESC);

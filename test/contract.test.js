@@ -38,7 +38,7 @@ const event = {
 };
 const order = {
   id: ORDER_ID, reference: 'FESTA-x', event_id: EVENT_ID, organizer_id: ORGANIZER, merchant_id: MERCHANT, buyer_id: BUYER,
-  quantity: 2, unit_price_cents: 2_500_000, subtotal_cents: 5_000_000, commission_cents: 400_000, total_cents: 5_400_000,
+  quantity: 2, unit_price_cents: 2_500_000, subtotal_cents: 5_000_000, total_cents: 5_000_000,
   currency: 'COP', status: 'PENDING', approved_at: null, created_at: new Date(), expires_at: new Date(),
 };
 
@@ -88,7 +88,7 @@ describe.skipIf(!fs.existsSync(schemaFile('order.created')))('contratos de payme
   });
 
   it('order.approved', async () => {
-    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'APPROVED', amountInCents: 5_400_000, currency: 'COP', transactionId: 'tx-1', paymentMethodType: 'NEQUI' });
+    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'APPROVED', amountInCents: 5_000_000, currency: 'COP', transactionId: 'tx-1', paymentMethodType: 'NEQUI' });
     expect(result.outcome).toBe('approved');
     expectValid('order.approved', lastPayload('order.approved'));
   });
@@ -100,7 +100,7 @@ describe.skipIf(!fs.existsSync(schemaFile('order.created')))('contratos de payme
   });
 
   it('order.failed', async () => {
-    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'DECLINED', amountInCents: 5_400_000, currency: 'COP', transactionId: 'tx-2', statusMessage: 'Fondos insuficientes' });
+    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'DECLINED', amountInCents: 5_000_000, currency: 'COP', transactionId: 'tx-2', statusMessage: 'Fondos insuficientes' });
     expect(result.outcome).toBe('failed');
     expectValid('order.failed', lastPayload('order.failed'));
   });

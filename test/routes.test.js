@@ -51,13 +51,13 @@ describe('POST /payments/orders', () => {
   it('crea la orden y devuelve el checkout de Wompi', async () => {
     repo.createOrder.mockResolvedValue({
       outcome: 'created',
-      order: { id: 'o1', status: 'PENDING', reference: 'FESTA-o1', total_cents: 5400000 },
+      order: { id: 'o1', status: 'PENDING', reference: 'FESTA-o1', total_cents: 5000000 },
     });
     const res = await user(request(createApp()).post('/payments/orders')).set('Idempotency-Key', 'abc12345').send({ eventId: EVENT_ID, quantity: 2 });
 
     expect(res.status).toBe(201);
     expect(res.body.checkout.reference).toBe('FESTA-o1');
-    expect(res.body.checkout.amountInCents).toBe(5400000);
+    expect(res.body.checkout.amountInCents).toBe(5000000);
     expect(repo.createOrder).toHaveBeenCalledWith(expect.objectContaining({ buyerId: USER, idempotencyKey: 'abc12345', quantity: 2 }));
   });
 
@@ -98,14 +98,14 @@ describe('admin', () => {
 describe('POST /webhooks/wompi', () => {
   const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
   function body(status = 'APPROVED') {
-    const transaction = { id: 'tx-1', status, amount_in_cents: 5400000, reference: 'FESTA-o1', payment_method_type: 'NEQUI' };
+    const transaction = { id: 'tx-1', status, amount_in_cents: 5000000, reference: 'FESTA-o1', payment_method_type: 'NEQUI' };
     const timestamp = 1700000000;
     return {
       event: 'transaction.updated',
       data: { transaction },
       signature: {
         properties: ['transaction.id', 'transaction.status', 'transaction.amount_in_cents'],
-        checksum: sha(`tx-1${status}5400000${timestamp}evt-secret`),
+        checksum: sha(`tx-1${status}5000000${timestamp}evt-secret`),
       },
       timestamp,
     };
@@ -126,7 +126,7 @@ describe('POST /webhooks/wompi', () => {
 
     expect(res.status).toBe(200);
     expect(repo.applyTransaction).toHaveBeenCalledWith(
-      expect.objectContaining({ reference: 'FESTA-o1', status: 'APPROVED', amountInCents: 5400000 }),
+      expect.objectContaining({ reference: 'FESTA-o1', status: 'APPROVED', amountInCents: 5000000 }),
       null,
     );
   });

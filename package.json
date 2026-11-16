@@ -1,7 +1,7 @@
 {
   "name": "festa-payment-service",
   "version": "1.0.0",
-  "description": "RF11, RN2: venta de boletas con Wompi y comisión de Festa",
+  "description": "RF11: venta de boletas con Wompi (modelo oficial, sin comisión por boleta)",
   "main": "src/server.js",
   "private": true,
   "engines": {

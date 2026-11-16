@@ -1,6 +1,6 @@
 # festa-payment-service
 
-RF11 y RN2: venta de boletas dentro de la app con [Wompi](https://docs.wompi.co) y comisión de Festa por boleta.
+RF11: venta de boletas dentro de la app con [Wompi](https://docs.wompi.co). Modelo oficial: suscripción Festa Pro, sin comisión por boleta.
 Node 20 / Express con PostgreSQL (`payment_db`). Puerto 8085.
 
 La app **nunca** envía datos de tarjeta a Festa (RNF6): este servicio crea la orden, firma el monto y la app abre el
@@ -17,9 +17,8 @@ checkout de Wompi. Wompi avisa el resultado por webhook firmado.
    vende si aún hay cupo; si no, pasa a reembolso.
 5. booking-service consume `order.approved` y emite un pase QR por boleta.
 
-**Comisión (RN2):** la paga el comprador encima del precio: `total = subtotal + comisión`, con
-`comisión = round(precio × COMMISSION_PERCENT / 100) + COMMISSION_FIXED_CENTS` por boleta. Al arrancar se avisa si la
-comisión no cubre el costo de Wompi (2,99 % + IVA). El comercio recibe el subtotal en las liquidaciones.
+**Precio:** `total = subtotal` (precio de la boleta × cantidad). No hay comisión por boleta en el modelo oficial. El
+comercio recibe el subtotal en las liquidaciones.
 
 ## API
 
@@ -27,7 +26,7 @@ Todas con JWT salvo el webhook. El cliente las llama con el prefijo `/api` (Kong
 
 | Método y ruta | Qué hace |
 |---|---|
-| `GET /payments/events/{id}/quote?quantity=2` | Precio, comisión, total y cupos libres |
+| `GET /payments/events/{id}/quote?quantity=2` | Precio, total y cupos libres |
 | `POST /payments/orders` `{eventId, quantity}` | Crea la orden y devuelve el checkout. Acepta `Idempotency-Key` |
 | `GET /payments/orders/mine` | Órdenes del usuario |
 | `GET /payments/orders/{id}` | Una orden (comprador o admin) |

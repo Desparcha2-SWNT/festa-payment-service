@@ -48,8 +48,6 @@ export const config = {
     wompiPercent: number('WOMPI_FEE_PERCENT', 2.99),
     wompiFixedCents: number('WOMPI_FEE_FIXED_CENTS', 0),
     ivaPercent: number('IVA_PERCENT', 19),
-    commissionPercent: number('COMMISSION_PERCENT', 8),
-    commissionFixedCents: number('COMMISSION_FIXED_CENTS', 0),
   },
 
   reservationHoldMinutes: number('RESERVATION_HOLD_MINUTES', 15),

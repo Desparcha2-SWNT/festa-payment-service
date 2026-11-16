@@ -23,7 +23,6 @@ export function toApi(row) {
     quantity: row.quantity,
     unitPriceCents: row.unit_price_cents,
     subtotalCents: row.subtotal_cents,
-    commissionCents: row.commission_cents,
     totalCents: row.total_cents,
     currency: row.currency,
     status: row.status,
@@ -81,12 +80,12 @@ export async function createOrder({ eventId, quantity, buyerId, idempotencyKey =
 
     const { rows } = await client.query(
       `INSERT INTO orders (id, reference, event_id, organizer_id, merchant_id, buyer_id, idempotency_key, quantity,
-         unit_price_cents, subtotal_cents, commission_cents, total_cents, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         unit_price_cents, subtotal_cents, total_cents, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [
         orderId, reference, eventId, event.organizer_id, event.merchant_id, buyerId, idempotencyKey, quantity,
-        price.unitPriceCents, price.subtotalCents, price.commissionCents, price.totalCents, expiresAt,
+        price.unitPriceCents, price.subtotalCents, price.totalCents, expiresAt,
       ],
     );
     await client.query('UPDATE event_projection SET held = held + $2, updated_at = now() WHERE event_id = $1', [
@@ -131,7 +130,7 @@ export async function findOrdersByBuyer(buyerId, limit = 50) {
   return rows;
 }
 
-/** Cotización sin crear nada: precio, comisión y cupos libres. */
+/** Cotización sin crear nada: precio, total y cupos libres. */
 export async function quote(eventId, quantity) {
   const { rows } = await pool.query('SELECT * FROM event_projection WHERE event_id = $1', [eventId]);
   const event = rows[0];
@@ -216,7 +215,9 @@ export async function applyTransaction({ reference, status, amountInCents, curre
           quantity: approved.quantity,
           unitPriceCents: approved.unit_price_cents,
           subtotalCents: approved.subtotal_cents,
-          commissionCents: approved.commission_cents,
+          // El contrato order.approved (festa-infra) todavía exige este campo. Modelo oficial: siempre 0.
+          // Quitarlo cuando se actualice el contrato.
+          commissionCents: 0,
           totalCents: approved.total_cents,
           currency: 'COP',
           paymentMethod: approved.payment_method,
@@ -391,7 +392,7 @@ export async function pendingPayouts() {
 
 /**
  * El admin registra la transferencia manual a un comercio: liquida todas sus órdenes aprobadas de
- * eventos terminados (el comercio recibe el subtotal; la comisión es de Festa).
+ * eventos terminados (el comercio recibe el subtotal de sus boletas).
  */
 export async function recordPayout(merchantId, adminId, { reference, paidAt }, correlationId) {
   return withTransaction(async (client) => {

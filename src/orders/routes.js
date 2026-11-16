@@ -52,7 +52,7 @@ function sendOutcome(res, table, result) {
 
 const quantitySchema = z.coerce.number().int().min(1).max(10);
 
-// Cotización: precio, comisión de Festa y cupos libres antes de comprar.
+// Cotización: precio, total y cupos libres antes de comprar.
 paymentsRouter.get('/events/:id/quote', validId, async (req, res, next) => {
   const quantity = quantitySchema.safeParse(req.query.quantity ?? 1);
   if (!quantity.success) return res.status(400).json({ error: 'quantity inválida' });

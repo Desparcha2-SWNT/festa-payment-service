@@ -7,7 +7,7 @@ const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 describe('integritySignature', () => {
   it('es SHA256(referencia + monto + moneda + secreto)', () => {
-    expect(integritySignature({ reference: 'FESTA-1', amountInCents: 5400000 }, 'secreto')).toBe(sha('FESTA-15400000COPsecreto'));
+    expect(integritySignature({ reference: 'FESTA-1', amountInCents: 5000000 }, 'secreto')).toBe(sha('FESTA-15000000COPsecreto'));
   });
 
   it('checkoutData arma la URL del Web Checkout con la firma', () => {
@@ -19,7 +19,7 @@ describe('integritySignature', () => {
 });
 
 function signedEvent(secret, overrides = {}) {
-  const transaction = { id: '1234-1610641025-49201', status: 'APPROVED', amount_in_cents: 5400000, reference: 'FESTA-1', ...overrides };
+  const transaction = { id: '1234-1610641025-49201', status: 'APPROVED', amount_in_cents: 5000000, reference: 'FESTA-1', ...overrides };
   const timestamp = 1530291411;
   const properties = ['transaction.id', 'transaction.status', 'transaction.amount_in_cents'];
   const checksum = sha(`${transaction.id}${transaction.status}${transaction.amount_in_cents}${timestamp}${secret}`);

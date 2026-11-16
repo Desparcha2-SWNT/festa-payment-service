@@ -5,13 +5,8 @@ import { migrate } from './db/migrate.js';
 import { pool } from './db/pool.js';
 import { startMessaging } from './messaging/supervisor.js';
 import { startExpiryJob } from './jobs/expireOrders.js';
-import { commissionCoversWompi } from './orders/pricing.js';
 
 async function main() {
-  // RN2: con la configuración actual la comisión debe cubrir lo que cobra Wompi.
-  if (!commissionCoversWompi(1_000_000)) {
-    logger.warn(config.fees, 'COMMISSION_PERCENT no cubre el costo de Wompi + IVA: Festa pierde dinero por boleta');
-  }
   if (!config.wompi.eventsSecret || !config.wompi.integritySecret) {
     logger.warn('faltan WOMPI_EVENTS_SECRET o WOMPI_INTEGRITY_SECRET: el checkout y el webhook no funcionarán');
   }

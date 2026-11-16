@@ -10,7 +10,7 @@ vi.mock('../src/messaging/outboxRepository.js', () => ({ enqueue: vi.fn() }));
 
 const { applyTransaction } = await import('../src/orders/repository.js');
 
-const order = { id: 'o1', event_id: 'e1', reference: 'FESTA-o1', status: 'PENDING', total_cents: 5400000, quantity: 1 };
+const order = { id: 'o1', event_id: 'e1', reference: 'FESTA-o1', status: 'PENDING', total_cents: 5000000, quantity: 1 };
 
 describe('applyTransaction: moneda', () => {
   beforeEach(() => {
@@ -19,7 +19,7 @@ describe('applyTransaction: moneda', () => {
   });
 
   it('rechaza una transacción en otra moneda sin aprobar la orden', async () => {
-    const res = await applyTransaction({ reference: 'FESTA-o1', status: 'APPROVED', amountInCents: 5400000, currency: 'USD' });
+    const res = await applyTransaction({ reference: 'FESTA-o1', status: 'APPROVED', amountInCents: 5000000, currency: 'USD' });
     expect(res.outcome).toBe('currency_mismatch');
     const sqls = db.client.query.mock.calls.map((c) => c[0]);
     expect(sqls.some((s) => /UPDATE orders/.test(s))).toBe(false);
@@ -27,7 +27,7 @@ describe('applyTransaction: moneda', () => {
   });
 
   it('rechaza una transacción sin moneda', async () => {
-    const res = await applyTransaction({ reference: 'FESTA-o1', status: 'APPROVED', amountInCents: 5400000 });
+    const res = await applyTransaction({ reference: 'FESTA-o1', status: 'APPROVED', amountInCents: 5000000 });
     expect(res.outcome).toBe('currency_mismatch');
   });
 
@@ -35,7 +35,7 @@ describe('applyTransaction: moneda', () => {
     db.client.query.mockResolvedValueOnce({ rows: [order] }).mockResolvedValue({
       rows: [{ id: 'e1', capacity: null, sold: 0, held: 1, status: 'published', price_cents: 0 }],
     });
-    const res = await applyTransaction({ reference: 'FESTA-o1', status: 'DECLINED', amountInCents: 5400000, currency: 'COP' });
+    const res = await applyTransaction({ reference: 'FESTA-o1', status: 'DECLINED', amountInCents: 5000000, currency: 'COP' });
     expect(res.outcome).not.toBe('currency_mismatch');
   });
 });
