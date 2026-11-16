@@ -22,10 +22,14 @@ function build(contractsDir) {
   const producers = new Map();
   const exchanges = new Map();
   const eventsDir = path.join(contractsDir, 'events');
-  for (const domain of fs.readdirSync(eventsDir)) {
-    const domainDir = path.join(eventsDir, domain);
-    for (const file of fs.readdirSync(domainDir)) {
-      const schema = readJson(path.join(domainDir, file));
+  // Solo carpetas de dominio y archivos `*.schema.json`: un README, un .DS_Store o una subcarpeta en
+  // contracts/events no deben impedir que arranque el inbox.
+  for (const domain of fs.readdirSync(eventsDir, { withFileTypes: true })) {
+    if (!domain.isDirectory()) continue;
+    const domainDir = path.join(eventsDir, domain.name);
+    for (const file of fs.readdirSync(domainDir, { withFileTypes: true })) {
+      if (!file.isFile() || !file.name.endsWith('.schema.json')) continue;
+      const schema = readJson(path.join(domainDir, file.name));
       dataValidators.set(schema['x-routing-key'], ajv.compile(schema));
       producers.set(schema['x-routing-key'], schema['x-producer']);
       exchanges.set(schema['x-routing-key'], schema['x-exchange']);

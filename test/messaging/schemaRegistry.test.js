@@ -1,3 +1,4 @@
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -88,3 +89,21 @@ describe.skipIf(!hasContracts)('schemaRegistry', () => {
 if (!hasContracts) {
   console.warn(`[schemaRegistry.test] no se encontró ${contractsDir}; clona festa-infra como hermano de este repo o define FESTA_CONTRACTS_DIR`);
 }
+
+describe.skipIf(!hasContracts)('schemaRegistry con archivos que no son esquemas', () => {
+  it('ignora README, archivos sueltos y subcarpetas dentro de contracts/events', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'contracts-'));
+    try {
+      fs.cpSync(contractsDir, tmp, { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'events', 'README.md'), '# notas');
+      fs.writeFileSync(path.join(tmp, 'events', 'payment', 'notas.txt'), 'no es json');
+      fs.mkdirSync(path.join(tmp, 'events', 'payment', 'borradores'));
+      _resetForTests();
+      const registry = getSchemaRegistry(tmp);
+      expect(registry.getDataValidator('order.approved')).toBeTypeOf('function');
+    } finally {
+      _resetForTests();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
