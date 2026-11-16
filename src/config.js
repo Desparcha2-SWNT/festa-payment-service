@@ -45,8 +45,9 @@ export const config = {
   },
 
   fees: {
-    wompiPercent: number('WOMPI_FEE_PERCENT', 2.99),
-    wompiFixedCents: number('WOMPI_FEE_FIXED_CENTS', 0),
+    // Plan Avanzado de Wompi Colombia (página oficial, consultada 16-11-2026): 2,65 % + COP 700 + IVA por transacción exitosa.
+    wompiPercent: number('WOMPI_FEE_PERCENT', 2.65),
+    wompiFixedCents: number('WOMPI_FEE_FIXED_CENTS', 700),
     ivaPercent: number('IVA_PERCENT', 19),
   },
 
