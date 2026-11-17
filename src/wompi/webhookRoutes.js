@@ -61,11 +61,18 @@ webhookRouter.post('/wompi', async (req, res, next) => {
       },
       req.headers['x-correlation-id'] ?? null,
     );
-    if (result.outcome === 'amount_mismatch') {
-      logger.error({ reference: tx.reference, amount: tx.amount_in_cents }, 'el monto de Wompi no coincide con la orden');
-    }
-    if (result.outcome === 'currency_mismatch') {
-      logger.error({ reference: tx.reference, currency: tx.currency }, 'la moneda de Wompi no coincide con la orden');
+    if (result.outcome === 'amount_mismatch' || result.outcome === 'currency_mismatch') {
+      // Se registra antes de confirmar el webhook. Si esta escritura falla, no se marca como procesado y
+      // Wompi lo reintenta; ON CONFLICT evita duplicar el registro en esos reintentos.
+      await pool.query(
+        `INSERT INTO payment_discrepancies (reference, kind, transaction_id, amount_cents, currency)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (transaction_id, kind) DO NOTHING`,
+        [String(tx.reference ?? ''), result.outcome, String(tx.id ?? ''), tx.amount_in_cents ?? null, tx.currency ?? null],
+      );
+      logger.error(
+        { reference: tx.reference, kind: result.outcome, amount: tx.amount_in_cents, currency: tx.currency },
+        'el cobro de Wompi no coincide con la orden: registrado en payment_discrepancies',
+      );
     }
     const finished = await pool.query(
       'UPDATE wompi_webhooks SET processed_at = now() WHERE checksum = $1 AND claim_id = $2',
