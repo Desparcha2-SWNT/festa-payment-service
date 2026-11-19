@@ -48,24 +48,48 @@ function available(event) {
   return event.capacity === null ? Infinity : event.capacity - event.sold - event.held;
 }
 
+async function findByIdempotencyKey(db, buyerId, idempotencyKey) {
+  const { rows } = await db.query(
+    `SELECT o.*, e.title FROM orders o JOIN event_projection e USING (event_id)
+     WHERE o.buyer_id = $1 AND o.idempotency_key = $2`,
+    [buyerId, idempotencyKey],
+  );
+  return rows[0];
+}
+
 /**
  * Crea una orden PENDING y retiene los cupos mientras el usuario paga en Wompi
  * (contracts/README.md § Compra de boletas, paso 2). Con el mismo Idempotency-Key devuelve la
- * misma orden en vez de crear otra.
+ * misma orden en vez de crear otra, también cuando las dos solicitudes llegan a la vez.
  */
-export async function createOrder({ eventId, quantity, buyerId, idempotencyKey = null, correlationId = null }) {
+export async function createOrder(params) {
+  try {
+    return await insertOrder(params);
+  } catch (err) {
+    // Otra solicitud con la misma clave ganó la carrera (p. ej. para otro evento, que no comparte el
+    // bloqueo): la transacción ya hizo rollback, así que se devuelve la orden que quedó guardada.
+    if (err.code === '23505' && err.constraint === 'orders_idempotency_idx' && params.idempotencyKey) {
+      const existing = await findByIdempotencyKey(pool, params.buyerId, params.idempotencyKey);
+      if (existing) return { outcome: 'existing', order: existing };
+    }
+    throw err;
+  }
+}
+
+async function insertOrder({ eventId, quantity, buyerId, idempotencyKey = null, correlationId = null }) {
   return withTransaction(async (client) => {
     if (idempotencyKey) {
-      const { rows } = await client.query(
-        `SELECT o.*, e.title FROM orders o JOIN event_projection e USING (event_id)
-         WHERE o.buyer_id = $1 AND o.idempotency_key = $2`,
-        [buyerId, idempotencyKey],
-      );
-      if (rows[0]) return { outcome: 'existing', order: rows[0] };
+      const existing = await findByIdempotencyKey(client, buyerId, idempotencyKey);
+      if (existing) return { outcome: 'existing', order: existing };
     }
 
     const event = await lockEvent(client, eventId);
     if (!event) return { outcome: 'not_found' };
+    if (idempotencyKey) {
+      // Una solicitud simultánea con la misma clave pudo crear la orden mientras se esperaba el bloqueo.
+      const existing = await findByIdempotencyKey(client, buyerId, idempotencyKey);
+      if (existing) return { outcome: 'existing', order: existing };
+    }
     if (!event.ticketed || event.price_cents <= 0) return { outcome: 'not_ticketed' };
     if (event.status !== 'published' || new Date(event.ends_at) <= new Date()) return { outcome: 'closed' };
     if (event.max_tickets_per_order && quantity > event.max_tickets_per_order) {
