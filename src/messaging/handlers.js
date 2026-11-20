@@ -1,4 +1,4 @@
-import { ANONYMOUS_BUYER, expireOrder, requestRefund } from '../orders/repository.js';
+import { ANONYMOUS_BUYER, expireOrder, lockBuyer, requestRefund } from '../orders/repository.js';
 
 // Un handler por tipo de mensaje consumido (ver contracts/README.md § Qué consume cada servicio).
 // Recibe `data`, el `client` de una transacción ya abierta y el `envelope` completo.
@@ -80,17 +80,19 @@ export const handlers = {
   // Ley 1581: las órdenes se conservan por contabilidad, pero sin el comprador. Las pendientes vencen y los
   // mensajes sin publicar se anonimizan (no se borran).
   'account.deleted': async (data, client, envelope) => {
+    await lockBuyer(client, data.userId); // ninguna orden nueva de esta cuenta entra mientras se borra
     const { rows } = await client.query(`SELECT * FROM orders WHERE buyer_id = $1 AND status = 'PENDING' FOR UPDATE`, [data.userId]);
     for (const order of rows) await expireOrder(client, order, { causationId: envelope.eventId });
     // Lápida: un JWT vigente de la cuenta borrada no puede crear órdenes nuevas (ver createOrder).
     await client.query('INSERT INTO deleted_accounts (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING', [data.userId]);
-    // El outbox también lleva el buyerId en el payload. Los mensajes que aún no salieron NO se borran
-    // (un order.approved sin publicar dejaría un cobro sin pase ni reembolso): se anonimizan con el mismo
-    // comprador anónimo de las órdenes, que sigue cumpliendo el contrato. Los ya publicados los maneja
-    // cada consumidor con su propio account.deleted.
+    // El outbox también lleva el buyerId en el payload. Ningún mensaje se borra (un order.approved sin
+    // publicar dejaría un cobro sin pase ni reembolso): todos, enviados o no, se anonimizan con el comprador
+    // anónimo de las órdenes, que sigue cumpliendo el contrato. Sin filtrar por sent_at: si el publicador
+    // tiene la fila bloqueada, este UPDATE espera a que termine y la anonimiza igual (la copia que ya salió
+    // la borra cada consumidor con su propio account.deleted).
     await client.query(
       `UPDATE outbox SET payload = jsonb_set(payload, '{buyerId}', to_jsonb($2::text))
-        WHERE sent_at IS NULL AND payload->>'buyerId' = $1`,
+        WHERE payload->>'buyerId' = $1`,
       [data.userId, ANONYMOUS_BUYER],
     );
     await client.query('UPDATE orders SET buyer_id = $2, idempotency_key = NULL WHERE buyer_id = $1', [data.userId, ANONYMOUS_BUYER]);

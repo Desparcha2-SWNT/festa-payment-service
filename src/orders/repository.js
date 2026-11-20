@@ -9,6 +9,14 @@ export const EXCHANGE = 'festa.payment';
 // Comprador anonimizado (Ley 1581): las órdenes se conservan por contabilidad sin dato personal.
 export const ANONYMOUS_BUYER = '00000000-0000-0000-0000-000000000000';
 
+/**
+ * Serializa por comprador las transacciones que crean órdenes y el borrado de su cuenta (account.deleted).
+ * Bloqueo de transacción: se suelta solo con el COMMIT o el ROLLBACK.
+ */
+export async function lockBuyer(client, buyerId) {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended('buyer:' || $1, 0))", [buyerId]);
+}
+
 // Moneda de todas las órdenes; una transacción de Wompi en otra moneda no puede aprobarlas.
 const ORDER_CURRENCY = 'COP';
 
@@ -79,6 +87,9 @@ export async function createOrder(params) {
 async function insertOrder({ eventId, quantity, buyerId, idempotencyKey = null, correlationId = null }) {
   return withTransaction(async (client) => {
     // Una cuenta borrada conserva su JWT hasta que vence: no puede abrir órdenes nuevas (migración 007).
+    // La lápida se mira bajo el bloqueo del comprador, el mismo que toma account.deleted: si el borrado está
+    // en curso, esta orden espera a que termine y entonces ve la lápida.
+    await lockBuyer(client, buyerId);
     const deleted = await client.query('SELECT 1 FROM deleted_accounts WHERE user_id = $1', [buyerId]);
     if (deleted.rowCount > 0) return { outcome: 'account_deleted' };
     if (idempotencyKey) {
