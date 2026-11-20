@@ -3,8 +3,18 @@ import { ANONYMOUS_BUYER, expireOrder, requestRefund } from '../orders/repositor
 // Un handler por tipo de mensaje consumido (ver contracts/README.md § Qué consume cada servicio).
 // Recibe `data`, el `client` de una transacción ya abierta y el `envelope` completo.
 
+/** Marca el evento como cerrado: un snapshot que llegue después no lo vuelve a abrir (ver migración 006). */
+async function closeEvent(client, eventId, status) {
+  await client.query(
+    'INSERT INTO closed_events (event_id, status) VALUES ($1, $2) ON CONFLICT (event_id) DO NOTHING',
+    [eventId, status],
+  );
+}
+
 /** event.published / event.updated traen el snapshot completo; se ignora uno más viejo que el guardado. */
 async function upsertSnapshot(data, client) {
+  const { rowCount } = await client.query('SELECT 1 FROM closed_events WHERE event_id = $1', [data.eventId]);
+  if (rowCount > 0) return; // evento cancelado o expirado: un snapshot retrasado no lo reabre
   await client.query(
     `INSERT INTO event_projection (event_id, organizer_id, merchant_id, title, starts_at, ends_at, capacity,
        ticketed, price_cents, max_tickets_per_order, status, version)
@@ -45,12 +55,14 @@ export const handlers = {
 
   // Cerrar la venta y expirar órdenes pendientes.
   'event.expired': async (data, client, envelope) => {
+    await closeEvent(client, data.eventId, 'expired');
     await client.query(`UPDATE event_projection SET status = 'expired', updated_at = now() WHERE event_id = $1`, [data.eventId]);
     await expirePendingOrders(client, data.eventId, envelope.eventId);
   },
 
   // contracts/README.md § Evento cancelado: deja de vender y pide reembolso de las órdenes aprobadas.
   'event.cancelled': async (data, client, envelope) => {
+    await closeEvent(client, data.eventId, 'cancelled');
     await client.query(
       `UPDATE event_projection SET status = 'cancelled', version = GREATEST(version, $2), updated_at = now() WHERE event_id = $1`,
       [data.eventId, data.version],
@@ -69,6 +81,10 @@ export const handlers = {
   'account.deleted': async (data, client, envelope) => {
     const { rows } = await client.query(`SELECT * FROM orders WHERE buyer_id = $1 AND status = 'PENDING' FOR UPDATE`, [data.userId]);
     for (const order of rows) await expireOrder(client, order, { causationId: envelope.eventId });
+    // El outbox también lleva el buyerId en el payload: los mensajes que aún no salieron se borran antes
+    // de publicarse (incluidos los order.expired recién encolados arriba). Los ya publicados los
+    // maneja cada consumidor con su propio account.deleted.
+    await client.query("DELETE FROM outbox WHERE sent_at IS NULL AND payload->>'buyerId' = $1", [data.userId]);
     await client.query('UPDATE orders SET buyer_id = $2, idempotency_key = NULL WHERE buyer_id = $1', [data.userId, ANONYMOUS_BUYER]);
   },
 };

@@ -211,8 +211,9 @@ export async function applyTransaction({ reference, status, amountInCents, curre
           order.event_id,
           order.quantity,
         ]);
-      } else if (order.status === 'EXPIRED') {
-        // Pago que llegó después de liberar los cupos (p. ej. PSE lento).
+      } else if (['EXPIRED', 'DECLINED', 'VOIDED', 'ERROR'].includes(order.status)) {
+        // Pago que llegó después de liberar los cupos: vencida, o rechazada y luego aprobada con la misma
+        // referencia (un reintento del comprador). Si ya no hay cupo o el evento no se vende, se reembolsa.
         if (available(event) < order.quantity || event.status !== 'published') {
           return requestRefund(client, order, 'admin', correlationId, { transactionId, paymentMethodType });
         }
