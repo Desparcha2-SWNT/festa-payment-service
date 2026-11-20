@@ -43,6 +43,7 @@ const ORDER_ERRORS = {
   closed: [409, 'el evento ya no está a la venta'],
   too_many: [409, 'superas el máximo de boletas por orden'],
   sold_out: [409, 'no quedan boletas suficientes'],
+  account_deleted: [403, 'esta cuenta fue eliminada'],
 };
 
 function sendOutcome(res, table, result) {

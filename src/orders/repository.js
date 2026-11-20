@@ -78,6 +78,9 @@ export async function createOrder(params) {
 
 async function insertOrder({ eventId, quantity, buyerId, idempotencyKey = null, correlationId = null }) {
   return withTransaction(async (client) => {
+    // Una cuenta borrada conserva su JWT hasta que vence: no puede abrir órdenes nuevas (migración 007).
+    const deleted = await client.query('SELECT 1 FROM deleted_accounts WHERE user_id = $1', [buyerId]);
+    if (deleted.rowCount > 0) return { outcome: 'account_deleted' };
     if (idempotencyKey) {
       const existing = await findByIdempotencyKey(client, buyerId, idempotencyKey);
       if (existing) return { outcome: 'existing', order: existing };
