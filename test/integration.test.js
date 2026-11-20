@@ -69,4 +69,55 @@ describe.skipIf(!DB)('cuenta borrada (PostgreSQL real)', () => {
       handlers['account.deleted']({ userId: buyer, deletedAt: new Date().toISOString() }, client, { eventId: crypto.randomUUID() }),
     );
   });
+// Devuelve si la promesa sigue pendiente tras `ms` (sin resolverla ni rechazarla).
+  const pendingAfter = (promise, ms) =>
+    Promise.race([promise.then(() => false, () => false), new Promise((r) => setTimeout(() => r(true), ms))]);
+
+  it('una orden que llega mientras se borra la cuenta espera al borrado y ve la lápida', async () => {
+    const victim = crypto.randomUUID();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await handlers['account.deleted']({ userId: victim, deletedAt: new Date().toISOString() }, client, { eventId: crypto.randomUUID() });
+      // El borrado aún no confirma: la orden debe quedarse esperando el bloqueo del comprador.
+      const order = createOrder({ eventId, quantity: 1, buyerId: victim });
+      expect(await pendingAfter(order, 400)).toBe(true);
+      await client.query('COMMIT');
+      expect((await order).outcome).toBe('account_deleted');
+    } finally {
+      client.release();
+    }
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM orders WHERE buyer_id = $1', [victim]);
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('el borrado anonimiza también los mensajes ya publicados y el que se está publicando', async () => {
+    const victim = crypto.randomUUID();
+    const insert = (sent) =>
+      pool.query(
+        `INSERT INTO outbox (exchange, routing_key, payload, sent_at) VALUES ('festa.payment', 'order.approved', $1, ${sent ? 'now()' : 'NULL'}) RETURNING id`,
+        [JSON.stringify({ buyerId: victim })],
+      );
+    await insert(true);
+    const { rows: [inFlight] } = await insert(false);
+
+    // El publicador tiene bloqueada la fila mientras publica.
+    const publisher = await pool.connect();
+    try {
+      await publisher.query('BEGIN');
+      await publisher.query('SELECT id FROM outbox WHERE id = $1 FOR UPDATE', [inFlight.id]);
+      const deletion = withTransaction((client) =>
+        handlers['account.deleted']({ userId: victim, deletedAt: new Date().toISOString() }, client, { eventId: crypto.randomUUID() }),
+      );
+      expect(await pendingAfter(deletion, 400)).toBe(true);
+      await publisher.query('UPDATE outbox SET sent_at = now() WHERE id = $1', [inFlight.id]);
+      await publisher.query('COMMIT');
+      await deletion;
+    } finally {
+      publisher.release();
+    }
+    const { rows } = await pool.query("SELECT count(*)::int AS n FROM outbox WHERE payload->>'buyerId' = $1", [victim]);
+    expect(rows[0].n).toBe(0);
+  });
 });
+
