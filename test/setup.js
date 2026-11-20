@@ -10,7 +10,7 @@ const dir = mkdtempSync(path.join(tmpdir(), 'festa-payment-service-test-'));
 const publicKeyPath = path.join(dir, 'jwt_public.pem');
 writeFileSync(publicKeyPath, jwtPublicKeyPem);
 
-process.env.DATABASE_URL ??= 'postgres://test:test@localhost:5432/payment_db_test';
+process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? 'postgres://test:test@localhost:5432/payment_db_test';
 process.env.AMQP_URL ??= 'amqp://test:test@localhost:5672';
 process.env.JWT_ISSUER ??= 'festa-auth';
 process.env.JWT_PUBLIC_KEY_PATH = publicKeyPath;

@@ -26,6 +26,7 @@ describe('createOrder: Idempotency-Key concurrente', () => {
   it('si la otra solicitud creó la orden mientras se esperaba el bloqueo del evento, devuelve esa orden', async () => {
     let lookups = 0;
     db.client.query.mockImplementation(async (sql) => {
+      if (/FROM deleted_accounts/.test(sql)) return { rows: [], rowCount: 0 };
       if (isKeyLookup(sql)) return { rows: lookups++ === 0 ? [] : [existing] };
       if (/FOR UPDATE/.test(sql)) return { rows: [event] };
       throw new Error(`no debería llegar a: ${sql}`);

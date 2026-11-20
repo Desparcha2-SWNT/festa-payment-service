@@ -46,6 +46,7 @@ const order = {
 function fakeClient(overrides = {}) {
   return {
     query: vi.fn(async (sql) => {
+      if (/FROM deleted_accounts/.test(sql)) return { rows: [], rowCount: 0 };
       if (/FROM event_projection WHERE event_id = \$1 FOR UPDATE/.test(sql)) return { rows: [overrides.event ?? event] };
       if (/FROM orders WHERE reference = \$1 FOR UPDATE/.test(sql)) return { rows: [overrides.order ?? order] };
       if (/FROM orders WHERE id = \$1 FOR UPDATE/.test(sql)) return { rows: [overrides.order ?? order] };

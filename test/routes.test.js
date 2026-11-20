@@ -65,6 +65,7 @@ describe('POST /payments/orders', () => {
     ['sold_out', 409],
     ['not_found', 404],
     ['not_ticketed', 409],
+    ['account_deleted', 403],
   ])('%s da %i', async (outcome, status) => {
     repo.createOrder.mockResolvedValue({ outcome });
     const res = await user(request(createApp()).post('/payments/orders')).send({ eventId: EVENT_ID, quantity: 1 });
