@@ -118,12 +118,12 @@ async function insertOrder({ eventId, quantity, buyerId, idempotencyKey = null, 
 
     const { rows } = await client.query(
       `INSERT INTO orders (id, reference, event_id, organizer_id, merchant_id, buyer_id, idempotency_key, quantity,
-         unit_price_cents, subtotal_cents, total_cents, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         unit_price_cents, subtotal_cents, total_cents, gateway_fee_cents, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
       [
         orderId, reference, eventId, event.organizer_id, event.merchant_id, buyerId, idempotencyKey, quantity,
-        price.unitPriceCents, price.subtotalCents, price.totalCents, expiresAt,
+        price.unitPriceCents, price.subtotalCents, price.totalCents, price.gatewayFeeCents, expiresAt,
       ],
     );
     await client.query('UPDATE event_projection SET held = held + $2, updated_at = now() WHERE event_id = $1', [
@@ -420,7 +420,7 @@ export async function markRefunded(orderId, adminId, reference, correlationId) {
 export async function pendingPayouts() {
   const { rows } = await pool.query(
     `SELECT o.merchant_id, o.organizer_id, m.business_name, COUNT(*)::int AS order_count,
-       SUM(o.subtotal_cents)::bigint AS amount_cents, MIN(o.approved_at) AS period_from, MAX(o.approved_at) AS period_to
+       SUM(GREATEST(o.subtotal_cents - o.gateway_fee_cents, 0))::bigint AS amount_cents, MIN(o.approved_at) AS period_from, MAX(o.approved_at) AS period_to
      FROM orders o JOIN event_projection e USING (event_id) LEFT JOIN merchants m ON m.merchant_id = o.merchant_id
      WHERE o.status = 'APPROVED' AND o.payout_id IS NULL AND o.merchant_id IS NOT NULL AND e.ends_at <= now()
      GROUP BY o.merchant_id, o.organizer_id, m.business_name ORDER BY amount_cents DESC`,
@@ -438,7 +438,7 @@ export async function pendingPayouts() {
 
 /**
  * El admin registra la transferencia manual a un comercio: liquida todas sus órdenes aprobadas de
- * eventos terminados (el comercio recibe el subtotal de sus boletas).
+ * eventos terminados (el comercio recibe el subtotal de sus boletas menos la comisión de Wompi).
  */
 export async function recordPayout(merchantId, adminId, { reference, paidAt }, correlationId) {
   return withTransaction(async (client) => {
@@ -450,7 +450,7 @@ export async function recordPayout(merchantId, adminId, { reference, paidAt }, c
     );
     if (orders.length === 0) return { outcome: 'nothing_to_pay' };
 
-    const amountCents = orders.reduce((sum, o) => sum + o.subtotal_cents, 0);
+    const amountCents = orders.reduce((sum, o) => sum + Math.max(o.subtotal_cents - o.gateway_fee_cents, 0), 0);
     const approvedTimes = orders.map((o) => new Date(o.approved_at).getTime());
     const periodFrom = new Date(Math.min(...approvedTimes));
     const periodTo = new Date(Math.max(...approvedTimes));
@@ -489,7 +489,8 @@ export async function merchantSummary(userId) {
     `SELECT e.event_id, e.title, e.starts_at,
        COALESCE(SUM(o.quantity) FILTER (WHERE o.status = 'APPROVED'), 0)::int AS tickets_sold,
        COALESCE(SUM(o.subtotal_cents) FILTER (WHERE o.status = 'APPROVED'), 0)::bigint AS gross_cents,
-       COALESCE(SUM(o.subtotal_cents) FILTER (WHERE o.status = 'APPROVED' AND o.payout_id IS NULL), 0)::bigint AS pending_payout_cents
+       COALESCE(SUM(o.gateway_fee_cents) FILTER (WHERE o.status = 'APPROVED'), 0)::bigint AS gateway_fee_cents,
+       COALESCE(SUM(GREATEST(o.subtotal_cents - o.gateway_fee_cents, 0)) FILTER (WHERE o.status = 'APPROVED' AND o.payout_id IS NULL), 0)::bigint AS pending_payout_cents
      FROM event_projection e LEFT JOIN orders o USING (event_id)
      WHERE e.organizer_id = $1 AND e.ticketed
      GROUP BY e.event_id, e.title, e.starts_at ORDER BY e.starts_at DESC`,
@@ -506,6 +507,7 @@ export async function merchantSummary(userId) {
       startsAt: iso(s.starts_at),
       ticketsSold: s.tickets_sold,
       grossCents: Number(s.gross_cents),
+      gatewayFeeCents: Number(s.gateway_fee_cents),
       pendingPayoutCents: Number(s.pending_payout_cents),
     })),
     payouts: payouts.map((p) => ({
