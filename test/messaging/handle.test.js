@@ -92,6 +92,55 @@ describe('handle (despacho del inbox)', () => {
   });
 });
 
+describe('origen del reintento (entrega con exchange vacío)', () => {
+  // attendance.confirmed no tiene handler todavía: si pasa la verificación se confirma sin tocar la base.
+  const envelope = { eventId: 'e1', eventType: 'attendance.confirmed', producer: 'booking-service', data: {} };
+  const registry = () =>
+    fakeRegistry({ expectedProducer: 'booking-service', expectedExchange: 'festa.booking', dataValidator: vi.fn().mockReturnValue(true) });
+
+  it('un x-origin-exchange sin firma o con firma inválida va a la DLQ aunque el productor sea el correcto', async () => {
+    // Quien publica directo en la inbox (credenciales de RabbitMQ compartidas) llega con exchange vacío.
+    for (const headers of [
+      { 'x-origin-exchange': 'festa.booking' },
+      { 'x-origin-exchange': 'festa.booking', 'x-origin-signature': 'ab'.repeat(32) },
+    ]) {
+      const channel = fakeChannel();
+      const msg = { content: Buffer.from(JSON.stringify(envelope)), properties: { headers }, fields: { exchange: '' } };
+      await _internal.handle(channel, msg, registry());
+      expect(channel.nack).toHaveBeenCalledWith(msg, false, false);
+      expect(channel.ack).not.toHaveBeenCalled();
+    }
+  });
+
+  it('el reintento que firmó este servicio vuelve a pasar la verificación del origen', async () => {
+    const channel = fakeChannel();
+    channel.sendToQueue.mockImplementation((q, c, o, cb) => cb(null));
+    const first = msgWith(envelope, 'festa.booking');
+    await _internal.handleFailure(channel, first, envelope, new Error('falla transitoria'));
+    const [, content, options] = channel.sendToQueue.mock.calls[0];
+    expect(options.headers['x-origin-exchange']).toBe('festa.booking');
+
+    // La segunda entrega llega por el exchange por defecto, con el contenido y los headers del reintento.
+    const second = { content, properties: options, fields: { exchange: '' } };
+    const channel2 = fakeChannel();
+    await _internal.handle(channel2, second, registry());
+    expect(channel2.ack).toHaveBeenCalledWith(second);
+    expect(channel2.nack).not.toHaveBeenCalled();
+  });
+
+  it('la firma de un reintento no sirve para otro mensaje', async () => {
+    const channel = fakeChannel();
+    channel.sendToQueue.mockImplementation((q, c, o, cb) => cb(null));
+    await _internal.handleFailure(channel, msgWith(envelope, 'festa.booking'), envelope, new Error('falla'));
+    const [, , options] = channel.sendToQueue.mock.calls[0];
+
+    const forged = { content: Buffer.from(JSON.stringify({ ...envelope, eventId: 'otro' })), properties: options, fields: { exchange: '' } };
+    const channel2 = fakeChannel();
+    await _internal.handle(channel2, forged, registry());
+    expect(channel2.nack).toHaveBeenCalledWith(forged, false, false);
+  });
+});
+
 describe('handleFailure (reintentos)', () => {
   // Number('algo-raro') es NaN, y NaN >= MAX_RETRIES siempre da false: sin validar esto, un
   // x-retry-count corrupto o forjado reintentaría para siempre en vez de agotarse.
