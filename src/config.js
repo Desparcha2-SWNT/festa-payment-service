@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 
 function required(name) {
@@ -27,14 +26,18 @@ export function parseTrustProxy(value) {
 const MIN_RETRY_KEY_LENGTH = 16;
 
 /**
- * Clave que firma el origen de los reintentos de la inbox. Si la variable no existe se genera una por proceso
- * (sirve con una réplica). Si existe pero está vacía o es demasiado corta se detiene el arranque: una clave vacía
- * es conocida por todos y dejaría la firma sin ningún efecto, sin que nadie lo notara.
+ * Clave que firma el origen de los reintentos de la inbox. Es OBLIGATORIA y debe ser estable: con una distinta en
+ * cada arranque, un reintento pendiente que sobreviva a un reinicio (o que otra réplica reciba) llegaría con una firma
+ * que ya no vale y se iría a la DLQ. Tampoco puede ser vacía, corta ni un valor de ejemplo (`change-me…`): una clave
+ * conocida dejaría la firma sin ningún efecto, sin que nadie lo notara. Se genera con `openssl rand -hex 32`.
  */
 export function resolveInboxRetryKey(value) {
-  if (value === undefined) return randomBytes(32).toString('hex');
-  if (value.trim().length < MIN_RETRY_KEY_LENGTH) {
-    throw new Error(`INBOX_RETRY_KEY está vacía o tiene menos de ${MIN_RETRY_KEY_LENGTH} caracteres: define una clave real (openssl rand -hex 32)`);
+  if (value === undefined) throw new Error('Falta la variable de entorno INBOX_RETRY_KEY (openssl rand -hex 32)');
+  const key = value.trim();
+  if (key.length < MIN_RETRY_KEY_LENGTH || /^change-?me/i.test(key)) {
+    throw new Error(
+      `INBOX_RETRY_KEY está vacía, tiene menos de ${MIN_RETRY_KEY_LENGTH} caracteres o es un valor de ejemplo: define una clave real (openssl rand -hex 32)`,
+    );
   }
   return value;
 }
@@ -49,7 +52,7 @@ export const config = {
   jwtIssuer: required('JWT_ISSUER'),
   jwtPublicKeyPath: required('JWT_PUBLIC_KEY_PATH'),
   contractsDir: process.env.FESTA_CONTRACTS_DIR ?? path.resolve('../festa-infra/contracts'),
-  // Firma el origen de los reintentos (ver inboxConsumer.originExchange). Con varias réplicas, todas deben compartirla.
+  // Firma el origen de los reintentos (ver inboxConsumer.originExchange). Con varias réplicas, todas deben compartirla (estable entre reinicios).
   inboxRetryKey: resolveInboxRetryKey(process.env.INBOX_RETRY_KEY),
 
   wompi: {
