@@ -150,6 +150,36 @@ describe('cobros de Wompi contra la orden (PostgreSQL real)', () => {
       expect(rows[0].kind).toBe('duplicate_charge');
     });
 
+    it('la comisión de Wompi la paga el comercio: el comprador paga el subtotal y la liquidación sale neta', async () => {
+      const order = await newOrder();
+      const expectedFee = Math.ceil((5_000_000 * 0.0265 + 70_000) * 1.19);
+      expect(order.total_cents).toBe(order.subtotal_cents); // el comprador no paga comisión
+      expect(order.gateway_fee_cents).toBe(expectedFee);
+      expect((await pay(order, { transactionId: 'tx-net' })).outcome).toBe('approved');
+
+      const { rows: ev } = await pool.query('SELECT organizer_id, merchant_id FROM event_projection WHERE event_id = $1', [eventId]);
+      const { merchantSummary, pendingPayouts, recordPayout } = await import('../src/orders/repository.js');
+      const summary = await merchantSummary(ev[0].organizer_id);
+      const row = summary.events.find((e) => e.eventId === eventId);
+      expect(row.gatewayFeeCents).toBeGreaterThanOrEqual(expectedFee);
+      expect(row.pendingPayoutCents).toBe(row.grossCents - row.gatewayFeeCents);
+
+      // El evento termina: lo que se le debe al comercio es el subtotal menos la comisión de cada orden aprobada.
+      await pool.query("UPDATE event_projection SET ends_at = now() - interval '1 hour' WHERE event_id = $1", [eventId]);
+      try {
+        const { rows: approved } = await pool.query(
+          "SELECT COALESCE(SUM(subtotal_cents - gateway_fee_cents), 0)::bigint AS net FROM orders WHERE status = 'APPROVED' AND payout_id IS NULL AND merchant_id = $1",
+          [ev[0].merchant_id],
+        );
+        const pending = (await pendingPayouts()).find((p) => p.merchantId === ev[0].merchant_id);
+        expect(pending.amountCents).toBe(Number(approved[0].net));
+        const paid = await recordPayout(ev[0].merchant_id, crypto.randomUUID(), { reference: 'T-1' });
+        expect(paid.payout.amountCents).toBe(Number(approved[0].net));
+      } finally {
+        await pool.query("UPDATE event_projection SET ends_at = now() + interval '2 days' WHERE event_id = $1", [eventId]);
+      }
+    });
+
     it.each([undefined, null])('una transacción aprobada sin monto (%s) no aprueba la orden', async (amount) => {
       const order = await newOrder();
       expect((await pay(order, { amountInCents: amount })).outcome).toBe('amount_mismatch');

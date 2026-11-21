@@ -38,7 +38,7 @@ const event = {
 };
 const order = {
   id: ORDER_ID, reference: 'FESTA-x', event_id: EVENT_ID, organizer_id: ORGANIZER, merchant_id: MERCHANT, buyer_id: BUYER,
-  quantity: 2, unit_price_cents: 2_500_000, subtotal_cents: 5_000_000, total_cents: 5_000_000,
+  quantity: 2, unit_price_cents: 2_500_000, subtotal_cents: 5_000_000, total_cents: 5_000_000, gateway_fee_cents: 240_975,
   currency: 'COP', status: 'PENDING', approved_at: null, created_at: new Date(), expires_at: new Date(),
 };
 
@@ -133,5 +133,7 @@ describe.skipIf(!fs.existsSync(schemaFile('order.created')))('contratos de payme
     const result = await repo.recordPayout(MERCHANT, ADMIN, { reference: 'Transferencia 1' });
     expect(result.outcome).toBe('recorded');
     expectValid('payout.recorded', lastPayload('payout.recorded'));
+    // Al comercio se le liquida el subtotal menos la comisión de Wompi.
+    expect(lastPayload('payout.recorded').amountCents).toBe(5_000_000 - 240_975);
   });
 });
