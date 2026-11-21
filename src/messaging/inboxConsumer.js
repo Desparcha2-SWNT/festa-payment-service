@@ -1,3 +1,4 @@
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { withTransaction } from '../db/pool.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
@@ -107,16 +108,30 @@ async function handle(channel, msg, registry) {
   }
 }
 
+/** Firma del origen de un reintento, atada al contenido exacto del mensaje (no se puede pasar a otro). */
+function signOrigin(origin, content) {
+  const digest = createHash('sha256').update(content).digest('hex');
+  return createHmac('sha256', config.inboxRetryKey).update(`${origin}\n${digest}`).digest('hex');
+}
+
 /**
  * Exchange por el que llegó el mensaje originalmente. Un reintento vuelve a la inbox desde la cola de
  * reintento (dead-letter por el exchange por defecto, así `fields.exchange` llega vacío): su origen va
- * en el header `x-origin-exchange`. El header solo se lee en ese caso, así uno forjado en un mensaje que
- * llegó directo no cambia el exchange verificado.
+ * en el header `x-origin-exchange`, firmado por este servicio en `x-origin-signature`. Con las credenciales
+ * de RabbitMQ compartidas, cualquiera puede publicar directo en la inbox y poner el header; sin la clave de
+ * este servicio no puede firmarlo, así que un origen sin firma válida cuenta como vacío y va a la DLQ.
+ * La firma no sustituye a los usuarios y permisos de RabbitMQ por servicio (ver festa-infra/SECRETS.md).
  */
 function originExchange(msg) {
   const exchange = msg.fields?.exchange ?? '';
   if (exchange !== '') return exchange;
-  return msg.properties?.headers?.['x-origin-exchange'] ?? '';
+  const headers = msg.properties?.headers ?? {};
+  const origin = headers['x-origin-exchange'];
+  const signature = headers['x-origin-signature'];
+  if (typeof origin !== 'string' || typeof signature !== 'string') return '';
+  const expected = Buffer.from(signOrigin(origin, msg.content), 'hex');
+  const given = Buffer.from(signature, 'hex');
+  return given.length === expected.length && timingSafeEqual(given, expected) ? origin : '';
 }
 
 async function handleFailure(channel, msg, envelope, err) {
@@ -144,7 +159,12 @@ async function handleFailure(channel, msg, envelope, err) {
         msg.content,
         {
           ...msg.properties,
-          headers: { ...msg.properties.headers, 'x-retry-count': retryCount + 1, 'x-origin-exchange': originExchange(msg) },
+          headers: {
+            ...msg.properties.headers,
+            'x-retry-count': retryCount + 1,
+            'x-origin-exchange': originExchange(msg),
+            'x-origin-signature': signOrigin(originExchange(msg), msg.content),
+          },
         },
         (publishErr) => (publishErr ? reject(publishErr) : resolve()),
       );
