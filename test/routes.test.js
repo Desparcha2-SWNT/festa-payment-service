@@ -193,6 +193,19 @@ describe('POST /webhooks/wompi', () => {
     );
   });
 
+  it('un segundo cobro aprobado de la misma referencia queda en payment_discrepancies antes de confirmar el webhook', async () => {
+    db.query.mockReset();
+    db.query.mockResolvedValue({ rowCount: 1 });
+    repo.applyTransaction.mockResolvedValue({ outcome: 'duplicate_charge' });
+    const res = await request(createApp()).post('/webhooks/wompi').send(body());
+    expect(res.status).toBe(200);
+    const sql = db.query.mock.calls.map((c) => c[0]);
+    const discrepancy = sql.findIndex((s) => s.includes('payment_discrepancies'));
+    expect(discrepancy).toBeGreaterThan(-1);
+    expect(discrepancy).toBeLessThan(sql.findIndex((s) => s.includes('SET processed_at')));
+    expect(db.query.mock.calls[discrepancy][1]).toEqual(expect.arrayContaining(['FESTA-o1', 'duplicate_charge']));
+  });
+
   it('si falla, borra la marca solo con el claim_id de este intento', async () => {
     db.query.mockReset();
     db.query.mockResolvedValue({ rowCount: 1 });

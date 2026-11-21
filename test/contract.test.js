@@ -94,6 +94,12 @@ describe.skipIf(!fs.existsSync(schemaFile('order.created')))('contratos de payme
     expectValid('order.approved', lastPayload('order.approved'));
   });
 
+  it.each([undefined, null, 'no-es-un-numero'])('rechaza una transacción aprobada con monto ausente o inválido (%s)', async (amount) => {
+    const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'APPROVED', amountInCents: amount, currency: 'COP', transactionId: 'tx-1' });
+    expect(result.outcome).toBe('amount_mismatch');
+    expect(h.enqueue).not.toHaveBeenCalled();
+  });
+
   it('rechaza un monto distinto al de la orden', async () => {
     const result = await repo.applyTransaction({ reference: 'FESTA-x', status: 'APPROVED', amountInCents: 1, currency: 'COP' });
     expect(result.outcome).toBe('amount_mismatch');

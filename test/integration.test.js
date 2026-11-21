@@ -11,6 +11,7 @@ describe.skipIf(!DB)('cuenta borrada (PostgreSQL real)', () => {
   let withTransaction;
   let handlers;
   let createOrder;
+  let applyTransaction;
   const eventId = crypto.randomUUID();
   const buyer = crypto.randomUUID();
   const other = crypto.randomUUID();
@@ -19,7 +20,7 @@ describe.skipIf(!DB)('cuenta borrada (PostgreSQL real)', () => {
     ({ pool, withTransaction } = await import('../src/db/pool.js'));
     const { migrate } = await import('../src/db/migrate.js');
     ({ handlers } = await import('../src/messaging/handlers.js'));
-    ({ createOrder } = await import('../src/orders/repository.js'));
+    ({ createOrder, applyTransaction } = await import('../src/orders/repository.js'));
     await migrate();
     await pool.query('TRUNCATE outbox, orders, event_projection, deleted_accounts, closed_events RESTART IDENTITY CASCADE');
     await withTransaction((client) =>
@@ -119,5 +120,43 @@ describe.skipIf(!DB)('cuenta borrada (PostgreSQL real)', () => {
     const { rows } = await pool.query("SELECT count(*)::int AS n FROM outbox WHERE payload->>'buyerId' = $1", [victim]);
     expect(rows[0].n).toBe(0);
   });
+describe('cobros de Wompi contra la orden (PostgreSQL real)', () => {
+    const pay = (order, extra = {}) =>
+      applyTransaction({
+        reference: order.reference,
+        status: 'APPROVED',
+        amountInCents: order.total_cents,
+        currency: 'COP',
+        transactionId: 'tx-A',
+        paymentMethodType: 'CARD',
+        ...extra,
+      });
+    const newOrder = async () => (await createOrder({ eventId, quantity: 1, buyerId: crypto.randomUUID() })).order;
+
+    it('un segundo cobro aprobado con otra transacción se señala como duplicado; la misma transacción reenviada no', async () => {
+      const order = await newOrder();
+      expect((await pay(order)).outcome).toBe('approved');
+      expect((await pay(order)).outcome).toBe('unchanged'); // el mismo webhook reenviado
+      expect((await pay(order, { transactionId: 'tx-B' })).outcome).toBe('duplicate_charge'); // el comprador pagó otra vez
+      const { rows } = await pool.query('SELECT status, provider_transaction_id FROM orders WHERE id = $1', [order.id]);
+      expect(rows[0]).toEqual({ status: 'APPROVED', provider_transaction_id: 'tx-A' }); // la orden original no se toca
+    });
+
+    it('la migración 008 permite guardar la discrepancia duplicate_charge', async () => {
+      await pool.query(
+        "INSERT INTO payment_discrepancies (reference, kind, transaction_id) VALUES ('FESTA-dup', 'duplicate_charge', 'tx-B')",
+      );
+      const { rows } = await pool.query("SELECT kind FROM payment_discrepancies WHERE transaction_id = 'tx-B'");
+      expect(rows[0].kind).toBe('duplicate_charge');
+    });
+
+    it.each([undefined, null])('una transacción aprobada sin monto (%s) no aprueba la orden', async (amount) => {
+      const order = await newOrder();
+      expect((await pay(order, { amountInCents: amount })).outcome).toBe('amount_mismatch');
+      const { rows } = await pool.query('SELECT status FROM orders WHERE id = $1', [order.id]);
+      expect(rows[0].status).toBe('PENDING');
+    });
+  });
 });
+
 
