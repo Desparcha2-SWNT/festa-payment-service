@@ -61,7 +61,7 @@ webhookRouter.post('/wompi', async (req, res, next) => {
       },
       req.headers['x-correlation-id'] ?? null,
     );
-    if (result.outcome === 'amount_mismatch' || result.outcome === 'currency_mismatch') {
+    if (['amount_mismatch', 'currency_mismatch', 'duplicate_charge'].includes(result.outcome)) {
       // Se registra antes de confirmar el webhook. Si esta escritura falla, no se marca como procesado y
       // Wompi lo reintenta; ON CONFLICT evita duplicar el registro en esos reintentos.
       await pool.query(
@@ -71,7 +71,7 @@ webhookRouter.post('/wompi', async (req, res, next) => {
       );
       logger.error(
         { reference: tx.reference, kind: result.outcome, amount: tx.amount_in_cents, currency: tx.currency },
-        'el cobro de Wompi no coincide con la orden: registrado en payment_discrepancies',
+        'el cobro de Wompi no coincide con la orden o es un segundo cobro de la misma referencia: registrado en payment_discrepancies',
       );
     }
     const finished = await pool.query(

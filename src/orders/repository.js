@@ -209,7 +209,9 @@ export async function applyTransaction({ reference, status, amountInCents, curre
   return withTransaction(async (client) => {
     const order = await lockOrder(client, 'reference', reference);
     if (!order) return { outcome: 'unknown_reference' };
-    if (amountInCents != null && Number(amountInCents) !== order.total_cents) {
+    // El monto es obligatorio: sin él no hay con qué comprobar el cobro, y una transacción sin monto no aprueba nada.
+    const paid = Number(amountInCents);
+    if (amountInCents == null || !Number.isFinite(paid) || paid !== order.total_cents) {
       return { outcome: 'amount_mismatch', order };
     }
     // Las órdenes se crean siempre en COP; una transacción en otra moneda nunca aprueba la orden.
@@ -233,6 +235,11 @@ export async function applyTransaction({ reference, status, amountInCents, curre
         }
         await client.query('UPDATE event_projection SET sold = sold + $2 WHERE event_id = $1', [order.event_id, order.quantity]);
       } else {
+        // La orden ya está cobrada (aprobada, o en reembolso/reembolsada). Si llega otra aprobación con una
+        // transacción DISTINTA, el comprador pagó dos veces la misma referencia: no se calla, se registra para
+        // conciliar (payment_discrepancies, ver el webhook). La misma transacción reenviada no cambia nada.
+        const stored = order.provider_transaction_id;
+        if (stored && transactionId != null && String(transactionId) !== stored) return { outcome: 'duplicate_charge', order };
         return { outcome: 'unchanged', order };
       }
 

@@ -13,12 +13,22 @@ import { logger } from '../logger.js';
  */
 export function startOutboxPublisher(connection, { intervalMs = 2000 } = {}) {
   let stopped = false;
-  let channelPromise = connection.createConfirmChannel();
+  // Se marca como manejado de inmediato: si el canal falla antes del siguiente tick, no debe contar como rechazo sin
+  // manejar (el tick lo vuelve a esperar y entonces sí entra al catch).
+  const newChannel = () => {
+    const created = connection.createConfirmChannel();
+    created.catch(() => {});
+    return created;
+  };
+  let channelPromise = newChannel();
 
   const tick = async () => {
     if (stopped) return;
-    const client = await pool.connect();
+    // La conexión se toma DENTRO del try: si la base está caída, `connect()` rechaza y el ciclo debe reprogramarse
+    // (finally) en vez de terminar el publicador con un rechazo sin manejar.
+    let client;
     try {
+      client = await pool.connect();
       const channel = await channelPromise;
       await client.query('BEGIN');
       const { rows } = await client.query(
@@ -61,11 +71,11 @@ export function startOutboxPublisher(connection, { intervalMs = 2000 } = {}) {
       }
       await client.query('COMMIT');
     } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
+      if (client) await client.query('ROLLBACK').catch(() => {});
       logger.error(err, 'fallo publicando el outbox, se reintenta en el siguiente tick');
-      channelPromise = connection.createConfirmChannel();
+      channelPromise = newChannel();
     } finally {
-      client.release();
+      client?.release();
       if (!stopped) setTimeout(tick, intervalMs);
     }
   };
