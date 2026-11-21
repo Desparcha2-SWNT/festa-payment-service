@@ -14,4 +14,5 @@ process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE
 process.env.AMQP_URL ??= 'amqp://test:test@localhost:5672';
 process.env.JWT_ISSUER ??= 'festa-auth';
 process.env.JWT_PUBLIC_KEY_PATH = publicKeyPath;
+process.env.INBOX_RETRY_KEY ??= 'clave-de-prueba-solo-para-las-pruebas-0123456789';
 process.env.LOG_LEVEL ??= 'silent';
