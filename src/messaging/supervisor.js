@@ -46,8 +46,18 @@ export async function startMessaging({ retryMs = 3000 } = {}) {
       return;
     }
 
-    const publisher = startOutboxPublisher(connection);
-    const consumerChannel = await startInboxConsumer(connection);
+    let publisher;
+    let consumerChannel;
+    try {
+      publisher = startOutboxPublisher(connection);
+      consumerChannel = await startInboxConsumer(connection);
+    } catch (err) {
+      // Armado a medias (por ejemplo, RabbitMQ recién reiniciado y sus colas aún sin cargar): se cierra
+      // lo que quedó y quien llamó reintenta, en vez de dejar el servicio sin mensajería.
+      publisher?.stop();
+      await connection.close().catch(() => {});
+      throw err;
+    }
     const previous = current;
     current = { connection, publisher, consumerChannel };
     // La anterior se cierra DESPUÉS de armar la nueva, no antes: si seguía viva por el tiempo
@@ -57,9 +67,19 @@ export async function startMessaging({ retryMs = 3000 } = {}) {
     connection.once('close', () => {
       if (stopped) return;
       logger.warn('conexión AMQP cerrada inesperadamente, reconectando');
-      wire().catch((err) => logger.error(err, 'no se pudo reconectar a RabbitMQ'));
+      rearm();
     });
     connection.on('error', (err) => logger.error(err, 'error en la conexión AMQP'));
+  }
+
+  // Si el rearmado falla (en AWS RabbitMQ corre sin disco y sus colas llegan unos segundos después de
+  // reiniciarse), se vuelve a intentar: nunca se queda sin mensajería mientras /health sigue respondiendo.
+  function rearm() {
+    if (stopped) return;
+    wire().catch((err) => {
+      logger.error(err, `no se pudo reconectar a RabbitMQ, reintentando en ${retryMs}ms`);
+      setTimeout(rearm, retryMs);
+    });
   }
 
   await wire(); // bloquea hasta la primera conexión, igual que antes de este cambio
