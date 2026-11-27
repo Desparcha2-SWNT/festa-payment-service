@@ -13,7 +13,7 @@
     "migrate": "node src/db/migrate.js",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:ci": "vitest run --reporter=junit --outputFile=test-results/junit.xml"
+    "test:ci": "vitest run --coverage --reporter=default --reporter=junit --outputFile.junit=test-results/junit.xml"
   },
   "repository": {
     "type": "git",
@@ -42,6 +42,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^10.13.0",
     "supertest": "^7.3.1",
     "vitest": "^5.0.5"

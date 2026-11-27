@@ -51,6 +51,8 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Contratos de mensajería (festa-infra es público, no hace falta token) para la prueba de contrato.
       - name: Descargar contratos de festa-infra
@@ -76,6 +78,31 @@ jobs:
         env:
           FESTA_CONTRACTS_DIR: ${{ github.workspace }}/.festa-infra/contracts
           TEST_DATABASE_URL: postgres://test:test@localhost:5432/payment_test
+
+      - name: Resumen de cobertura
+        if: always() && hashFiles('coverage/coverage-summary.json') != ''
+        run: |
+          node -e "
+            const t = require('./coverage/coverage-summary.json').total;
+            const fila = (n, k) => '| ' + n + ' | ' + t[k].pct + ' % | ' + t[k].covered + ' de ' + t[k].total + ' |';
+            console.log(['## Cobertura de pruebas (src/)', '', '| Métrica | Cobertura | Cubiertas |', '|---|---|---|',
+              fila('Líneas', 'lines'), fila('Sentencias', 'statements'), fila('Funciones', 'functions'), fila('Ramas', 'branches')].join('\n'));
+          " >> "$GITHUB_STEP_SUMMARY"
+
+      # Análisis de SonarCloud desde el CI, con la cobertura de las pruebas (coverage/lcov.info).
+      # Requiere SONAR_TOKEN (secreto de la organización) y el análisis automático apagado en el proyecto.
+      - name: Análisis de SonarCloud
+        if: always() && hashFiles('coverage/lcov.info') != ''
+        uses: SonarSource/sonarqube-scan-action@70bad232163b09d998ea0707ee80c0ec80798c16 # v8.5.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=desparcha2-swnt
+            -Dsonar.projectKey=Desparcha2-SWNT_festa-payment-service
+            -Dsonar.sources=src
+            -Dsonar.tests=test
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
       - name: Publicar resultados de pruebas en el PR
         if: always()
