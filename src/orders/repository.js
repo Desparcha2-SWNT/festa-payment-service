@@ -109,6 +109,13 @@ async function insertOrder({ eventId, quantity, buyerId, idempotencyKey = null, 
     if (event.max_tickets_per_order && quantity > event.max_tickets_per_order) {
       return { outcome: 'too_many', max: event.max_tickets_per_order };
     }
+    // Bajo el bloqueo del comprador (lockBuyer), así dos órdenes simultáneas no pasan el tope a la vez.
+    const pending = await client.query(
+      `SELECT count(*)::int AS n FROM orders
+       WHERE buyer_id = $1 AND event_id = $2 AND status = 'PENDING' AND expires_at > now()`,
+      [buyerId, eventId],
+    );
+    if (pending.rows[0].n >= config.maxPendingOrdersPerEvent) return { outcome: 'pending_exists' };
     if (available(event) < quantity) return { outcome: 'sold_out', available: Math.max(available(event), 0) };
 
     const price = priceOrder(event.price_cents, quantity);
