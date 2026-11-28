@@ -27,6 +27,7 @@ describe('createOrder: Idempotency-Key concurrente', () => {
     let lookups = 0;
     db.client.query.mockImplementation(async (sql) => {
       if (/FROM deleted_accounts|pg_advisory_xact_lock/.test(sql)) return { rows: [], rowCount: 0 };
+      if (/status = 'PENDING' AND expires_at > now\(\)/.test(sql)) return { rows: [{ n: 0 }], rowCount: 1 };
       if (isKeyLookup(sql)) return { rows: lookups++ === 0 ? [] : [existing] };
       if (/FOR UPDATE/.test(sql)) return { rows: [event] };
       throw new Error(`no debería llegar a: ${sql}`);
@@ -41,6 +42,7 @@ describe('createOrder: Idempotency-Key concurrente', () => {
     db.client.query.mockImplementation(async (sql) => {
       if (isKeyLookup(sql)) return { rows: [] };
       if (/FOR UPDATE/.test(sql)) return { rows: [event] };
+      if (/status = 'PENDING' AND expires_at > now\(\)/.test(sql)) return { rows: [{ n: 0 }], rowCount: 1 };
       if (/INSERT INTO orders/.test(sql)) {
         throw Object.assign(new Error('duplicate key'), { code: '23505', constraint: 'orders_idempotency_idx' });
       }
@@ -56,6 +58,7 @@ describe('createOrder: Idempotency-Key concurrente', () => {
     db.client.query.mockImplementation(async (sql) => {
       if (isKeyLookup(sql)) return { rows: [] };
       if (/FOR UPDATE/.test(sql)) return { rows: [event] };
+      if (/status = 'PENDING' AND expires_at > now\(\)/.test(sql)) return { rows: [{ n: 0 }], rowCount: 1 };
       if (/INSERT INTO orders/.test(sql)) {
         throw Object.assign(new Error('duplicate key'), { code: '23505', constraint: 'orders_reference_key' });
       }

@@ -187,6 +187,19 @@ describe('cobros de Wompi contra la orden (PostgreSQL real)', () => {
       expect(rows[0].status).toBe('PENDING');
     });
   });
+  it('un comprador no retiene más cupo con una segunda orden pendiente del mismo evento (auditoría 2026-11-28)', async () => {
+    const hoarder = crypto.randomUUID();
+    const heldOf = async () => (await pool.query('SELECT held FROM event_projection WHERE event_id = $1', [eventId])).rows[0].held;
+    const first = await createOrder({ eventId, quantity: 5, buyerId: hoarder, idempotencyKey: crypto.randomUUID() });
+    expect(first.outcome).toBe('created');
+    const heldAfterFirst = await heldOf();
+
+    const second = await createOrder({ eventId, quantity: 5, buyerId: hoarder, idempotencyKey: crypto.randomUUID() });
+    expect(second.outcome).toBe('pending_exists');
+    expect(await heldOf()).toBe(heldAfterFirst);
+
+    // Cuando la primera vence, puede volver a comprar.
+    await pool.query(`UPDATE orders SET expires_at = now() - interval '1 minute' WHERE id = $1`, [first.order.id]);
+    expect((await createOrder({ eventId, quantity: 1, buyerId: hoarder, idempotencyKey: crypto.randomUUID() })).outcome).toBe('created');
+  });
 });
-
-
