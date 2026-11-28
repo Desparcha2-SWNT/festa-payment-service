@@ -74,4 +74,7 @@ export const config = {
   },
 
   reservationHoldMinutes: number('RESERVATION_HOLD_MINUTES', 15),
+  // Órdenes PENDING vigentes que un comprador puede tener a la vez en un mismo evento. Cada una retiene
+  // cupo durante reservationHoldMinutes: sin tope, una cuenta dejaba un evento «agotado» sin pagar nada.
+  maxPendingOrdersPerEvent: number('MAX_PENDING_ORDERS_PER_EVENT', 1),
 };
